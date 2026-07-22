@@ -476,6 +476,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                           }
                         | {
                             approvalId: string;
+                            isAutomatic?: boolean;
                             providerMetadata?: Record<
                               string,
                               Record<string, any>
@@ -484,6 +485,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                               string,
                               Record<string, any>
                             >;
+                            signature?: string;
                             toolCallId: string;
                             type: "tool-approval-request";
                           }
@@ -1029,6 +1031,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                           }
                         | {
                             approvalId: string;
+                            isAutomatic?: boolean;
                             providerMetadata?: Record<
                               string,
                               Record<string, any>
@@ -1037,6 +1040,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                               string,
                               Record<string, any>
                             >;
+                            signature?: string;
                             toolCallId: string;
                             type: "tool-approval-request";
                           }
@@ -1596,11 +1600,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                         }
                       | {
                           approvalId: string;
+                          isAutomatic?: boolean;
                           providerMetadata?: Record<
                             string,
                             Record<string, any>
                           >;
                           providerOptions?: Record<string, Record<string, any>>;
+                          signature?: string;
                           toolCallId: string;
                           type: "tool-approval-request";
                         }
@@ -2173,6 +2179,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                           }
                         | {
                             approvalId: string;
+                            isAutomatic?: boolean;
                             providerMetadata?: Record<
                               string,
                               Record<string, any>
@@ -2181,6 +2188,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                               string,
                               Record<string, any>
                             >;
+                            signature?: string;
                             toolCallId: string;
                             type: "tool-approval-request";
                           }
@@ -2707,11 +2715,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                         }
                       | {
                           approvalId: string;
+                          isAutomatic?: boolean;
                           providerMetadata?: Record<
                             string,
                             Record<string, any>
                           >;
                           providerOptions?: Record<string, Record<string, any>>;
+                          signature?: string;
                           toolCallId: string;
                           type: "tool-approval-request";
                         }
@@ -3225,11 +3235,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                         }
                       | {
                           approvalId: string;
+                          isAutomatic?: boolean;
                           providerMetadata?: Record<
                             string,
                             Record<string, any>
                           >;
                           providerOptions?: Record<string, Record<string, any>>;
+                          signature?: string;
                           toolCallId: string;
                           type: "tool-approval-request";
                         }
@@ -3773,6 +3785,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                           }
                         | {
                             approvalId: string;
+                            isAutomatic?: boolean;
                             providerMetadata?: Record<
                               string,
                               Record<string, any>
@@ -3781,6 +3794,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                               string,
                               Record<string, any>
                             >;
+                            signature?: string;
                             toolCallId: string;
                             type: "tool-approval-request";
                           }
@@ -4231,11 +4245,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                         }
                       | {
                           approvalId: string;
+                          isAutomatic?: boolean;
                           providerMetadata?: Record<
                             string,
                             Record<string, any>
                           >;
                           providerOptions?: Record<string, Record<string, any>>;
+                          signature?: string;
                           toolCallId: string;
                           type: "tool-approval-request";
                         }
@@ -4491,7 +4507,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         {
           agentName?: string;
-          format?: "UIMessageChunk" | "TextStreamPart";
+          format?: "UIMessageChunk" | "UIMessageChunkV7" | "TextStreamPart";
           model?: string;
           order: number;
           provider?: string;
@@ -4563,7 +4579,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         },
         Array<{
           agentName?: string;
-          format?: "UIMessageChunk" | "TextStreamPart";
+          format?: "UIMessageChunk" | "UIMessageChunkV7" | "TextStreamPart";
           model?: string;
           order: number;
           provider?: string;

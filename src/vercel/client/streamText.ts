@@ -128,7 +128,7 @@ export async function streamText<
             model: getModelName(args.model),
             provider: getProviderName(args.model),
             providerOptions: args.providerOptions,
-            format: "UIMessageChunk",
+            format: "UIMessageChunkV7",
             order,
             stepOrder,
           },

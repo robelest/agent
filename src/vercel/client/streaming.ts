@@ -232,7 +232,11 @@ export class DeltaStreamer<T> {
       model?: string;
       provider?: string;
       providerOptions?: ProviderOptions;
-      format: "UIMessageChunk" | "TextStreamPart" | undefined;
+      format:
+        | "UIMessageChunk"
+        | "UIMessageChunkV7"
+        | "TextStreamPart"
+        | undefined;
     },
   ) {
     this.config = {
@@ -288,7 +292,7 @@ export class DeltaStreamer<T> {
       return;
     }
     // Once the stream has been finished externally (e.g. by the inline
-    // save in streamText's onStepFinish for the returnImmediately path),
+    // save in streamText's onStepEnd for the returnImmediately path),
     // the stream record is already "finished" in the DB. Late deltas
     // would be silently dropped by streams.addDelta — skip the work.
     if (this.#finishedExternally) {
@@ -304,9 +308,15 @@ export class DeltaStreamer<T> {
     }
   }
 
-  public async consumeStream(stream: AsyncIterableStream<T>) {
+  public async consumeStream(
+    stream: AsyncIterableStream<T>,
+    normalizePart?: (part: T, streamId?: string) => T | Promise<T>,
+  ) {
     for await (const chunk of stream) {
-      await this.addParts([chunk]);
+      const streamId = normalizePart ? await this.getStreamId() : undefined;
+      await this.addParts([
+        normalizePart ? await normalizePart(chunk, streamId) : chunk,
+      ]);
     }
     // Skip finish if it will be handled externally (atomically with message save)
     // or if the stream was aborted (e.g., due to a failed delta write).
@@ -439,6 +449,7 @@ export function compressUIMessageChunks(
     if (part.type === "text-delta" || part.type === "reasoning-delta") {
       if (last?.type === part.type && part.id === last.id) {
         last.delta += part.delta;
+        last.providerMetadata = part.providerMetadata ?? last.providerMetadata;
       } else {
         compressed.push(part);
       }

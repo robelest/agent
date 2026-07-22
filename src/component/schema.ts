@@ -95,7 +95,11 @@ export const schema = defineSchema({
     // This format dictates how the messages are materialized for capturing
     // partial messages during failure, as well as on the client side.
     format: v.optional(
-      v.union(v.literal("UIMessageChunk"), v.literal("TextStreamPart")),
+      v.union(
+        v.literal("UIMessageChunk"),
+        v.literal("UIMessageChunkV7"),
+        v.literal("TextStreamPart"),
+      ),
     ),
 
     threadId: v.id("threads"),

@@ -201,7 +201,21 @@ describe("materializeUIMessageChunks", () => {
     const metadata = { status: "failed" as const, error: "tool failure" };
     const actual = materializeUIMessageChunks(stream, chunks, metadata);
 
-    expect(actual).toEqual(await materializeWithAiSdk(chunks, metadata));
+    // Pinned, not compared against the installed AI SDK: this decoder is
+    // frozen at the 6.0.35 wire format that wrote these rows. AI SDK 7
+    // reworded its denial text to "Tool call execution denied.", and the
+    // decoder must keep reproducing what v6 stored.
+    const denial = actual
+      .flatMap((message) =>
+        Array.isArray(message.message?.content) ? message.message.content : [],
+      )
+      .find((part) => part.type === "tool-result" && part.output);
+    expect(denial).toMatchObject({
+      type: "tool-result",
+      toolCallId: "dynamic-call",
+      toolName: "dynamic_lookup",
+      output: { type: "error-text", value: "Tool execution denied." },
+    });
     expectValidMessages(actual);
   });
 

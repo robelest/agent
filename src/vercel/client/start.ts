@@ -288,12 +288,18 @@ export async function startGeneration<
             activeModel,
           );
         } else {
+          // A completed step still needs a durable assistant result when the
+          // provider emits no response messages. Materialize that result at
+          // the save boundary so serialization preserves its explicit input.
+          const responseMessages = toSave.step.response.messages;
           serialized = await serializeResponseMessages(
             ctx,
             component,
             toSave.step,
             activeModel,
-            toSave.step.response.messages,
+            responseMessages.length > 0
+              ? responseMessages
+              : [{ role: "assistant", content: [] }],
           );
         }
         const embeddings = await embedMessages(

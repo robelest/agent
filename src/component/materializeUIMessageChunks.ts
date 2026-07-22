@@ -31,6 +31,20 @@ type FilePart = {
   url: string;
   mediaType: string;
   filename?: string;
+  providerMetadata?: ProviderMetadata;
+};
+
+type ReasoningFilePart = {
+  type: "reasoning-file";
+  url: string;
+  mediaType: string;
+  providerMetadata?: ProviderMetadata;
+};
+
+type CustomPart = {
+  type: "custom";
+  kind: string;
+  providerMetadata?: ProviderMetadata;
 };
 
 type SourcePart =
@@ -68,9 +82,17 @@ type ToolPart = {
   errorText?: string;
   providerExecuted?: boolean;
   callProviderMetadata?: ProviderMetadata;
+  resultProviderMetadata?: ProviderMetadata;
   preliminary?: boolean;
   title?: string;
-  approval?: { id: string; approved?: boolean; reason?: string };
+  toolMetadata?: RecordValue;
+  approval?: {
+    id: string;
+    approved?: boolean;
+    reason?: string;
+    isAutomatic?: boolean;
+    signature?: string;
+  };
 };
 
 type DataPart = {
@@ -83,6 +105,8 @@ type LegacyUIMessagePart =
   | TextPart
   | ReasoningPart
   | FilePart
+  | ReasoningFilePart
+  | CustomPart
   | SourcePart
   | ToolPart
   | DataPart
@@ -93,6 +117,7 @@ type PartialToolCall = {
   toolName: string;
   dynamic?: boolean;
   title?: string;
+  toolMetadata?: RecordValue;
 };
 
 type StreamMetadata = {
@@ -103,19 +128,22 @@ type StreamMetadata = {
 class OrphanToolInvocationError extends Error {}
 
 /**
- * Recover stored messages from persisted AI SDK 5/6 UIMessageChunk rows
- * without loading the AI SDK in the Convex component.
+ * Recover stored messages from versioned AI SDK UIMessageChunk rows without
+ * loading the AI SDK in the Convex component.
  *
  * UIMessageChunk is a persisted wire format here, not a core Agent type.
- * Keep this decoder pinned to the AI SDK 6 behavior used when these rows were
- * written so a future provider adapter cannot reinterpret existing data.
+ * The legacy marker stays pinned to AI SDK 6 behavior. New v7-only chunks are
+ * accepted only under the explicit UIMessageChunkV7 marker.
  */
 export function materializeUIMessageChunks(
   stream: StreamMessage,
   chunks: readonly unknown[],
   metadata: StreamMetadata,
 ): MessageWithMetadataInternal[] {
-  if (stream.format !== "UIMessageChunk") {
+  if (
+    stream.format !== "UIMessageChunk" &&
+    stream.format !== "UIMessageChunkV7"
+  ) {
     throw new Error(
       `materializeUIMessageChunks: unsupported stream format "${stream.format ?? "text"}" for stream ${stream.streamId}`,
     );
@@ -125,6 +153,7 @@ export function materializeUIMessageChunks(
   const activeText: Record<string, TextPart> = {};
   const activeReasoning: Record<string, ReasoningPart> = {};
   const partialToolCalls: Record<string, PartialToolCall> = {};
+  let isOrphanTolerantPrefix = true;
 
   const staticToolPart = (toolCallId: string) =>
     parts.find(
@@ -140,6 +169,11 @@ export function materializeUIMessageChunks(
     parts.find(
       (part): part is ToolPart =>
         isToolPart(part) && part.toolCallId === toolCallId,
+    );
+  const toolPartByApprovalId = (approvalId: string) =>
+    parts.find(
+      (part): part is ToolPart =>
+        isToolPart(part) && part.approval?.id === approvalId,
     );
 
   const updateToolPart = (
@@ -162,11 +196,17 @@ export function materializeUIMessageChunks(
       existing.providerExecuted =
         options.providerExecuted ?? existing.providerExecuted;
       if (options.title !== undefined) existing.title = options.title;
+      if (options.toolMetadata !== undefined) {
+        existing.toolMetadata = options.toolMetadata;
+      }
       if (
         options.setCallProviderMetadataOnExisting &&
         options.callProviderMetadata !== undefined
       ) {
         existing.callProviderMetadata = options.callProviderMetadata;
+      }
+      if (options.resultProviderMetadata !== undefined) {
+        existing.resultProviderMetadata = options.resultProviderMetadata;
       }
       if (dynamic) existing.toolName = options.toolName;
       return existing;
@@ -184,7 +224,9 @@ export function materializeUIMessageChunks(
       preliminary: options.preliminary,
       providerExecuted: options.providerExecuted,
       callProviderMetadata: options.callProviderMetadata,
+      resultProviderMetadata: options.resultProviderMetadata,
       title: options.title,
+      toolMetadata: options.toolMetadata,
     };
     parts.push(created);
     return created;
@@ -195,6 +237,7 @@ export function materializeUIMessageChunks(
       const chunk = chunkRecord(value);
       switch (chunk.type) {
         case "text-start": {
+          isOrphanTolerantPrefix = false;
           const part: TextPart = {
             type: "text",
             text: "",
@@ -231,6 +274,7 @@ export function materializeUIMessageChunks(
           break;
         }
         case "reasoning-start": {
+          isOrphanTolerantPrefix = false;
           const part: ReasoningPart = {
             type: "reasoning",
             text: "",
@@ -266,14 +310,30 @@ export function materializeUIMessageChunks(
           delete activeReasoning[id];
           break;
         }
-        case "file":
+        case "file": {
+          isOrphanTolerantPrefix = false;
+          const metadata = v7OnlyProviderMetadata(
+            stream,
+            chunk.providerMetadata,
+            "file.providerMetadata",
+          );
           parts.push({
             type: "file",
             url: stringField(chunk, "url"),
             mediaType: stringField(chunk, "mediaType"),
+            providerMetadata: metadata,
           });
           break;
+        }
+        case "reasoning-file":
+        case "custom":
+          // The canonical message format has no slot for these yet; persisting
+          // them is a separate, additive change.
+          throw new Error(
+            `materializeUIMessageChunks: AI SDK 7 ${chunk.type} chunks cannot be represented in the Agent v1 message format`,
+          );
         case "source-url":
+          isOrphanTolerantPrefix = false;
           parts.push({
             type: "source-url",
             sourceId: stringField(chunk, "sourceId"),
@@ -283,6 +343,7 @@ export function materializeUIMessageChunks(
           });
           break;
         case "source-document":
+          isOrphanTolerantPrefix = false;
           parts.push({
             type: "source-document",
             sourceId: stringField(chunk, "sourceId"),
@@ -293,14 +354,21 @@ export function materializeUIMessageChunks(
           });
           break;
         case "tool-input-start": {
+          isOrphanTolerantPrefix = false;
           const toolCallId = stringField(chunk, "toolCallId");
           const toolName = stringField(chunk, "toolName");
           const dynamic = chunk.dynamic === true;
+          const callProviderMetadata = v7OnlyProviderMetadata(
+            stream,
+            chunk.providerMetadata,
+            "tool-input-start.providerMetadata",
+          );
           partialToolCalls[toolCallId] = {
             text: "",
             toolName,
             dynamic,
             title: optionalString(chunk.title),
+            toolMetadata: toolMetadata(stream, chunk.toolMetadata),
           };
           updateToolPart(dynamic, {
             toolCallId,
@@ -308,7 +376,9 @@ export function materializeUIMessageChunks(
             state: "input-streaming",
             input: undefined,
             providerExecuted: optionalBoolean(chunk.providerExecuted),
+            callProviderMetadata,
             title: optionalString(chunk.title),
+            toolMetadata: toolMetadata(stream, chunk.toolMetadata),
           });
           break;
         }
@@ -327,10 +397,12 @@ export function materializeUIMessageChunks(
             state: "input-streaming",
             input: parseCompleteJson(partial.text),
             title: partial.title,
+            toolMetadata: partial.toolMetadata,
           });
           break;
         }
         case "tool-input-available": {
+          isOrphanTolerantPrefix = false;
           const dynamic = chunk.dynamic === true;
           updateToolPart(dynamic, {
             toolCallId: stringField(chunk, "toolCallId"),
@@ -341,11 +413,14 @@ export function materializeUIMessageChunks(
             callProviderMetadata: providerMetadata(chunk.providerMetadata),
             setCallProviderMetadataOnExisting: true,
             title: optionalString(chunk.title),
+            toolMetadata: toolMetadata(stream, chunk.toolMetadata),
           });
           break;
         }
         case "tool-input-error": {
+          isOrphanTolerantPrefix = false;
           const dynamic = chunk.dynamic === true;
+          const metadata = providerMetadata(chunk.providerMetadata);
           updateToolPart(dynamic, {
             toolCallId: stringField(chunk, "toolCallId"),
             toolName: stringField(chunk, "toolName"),
@@ -354,59 +429,144 @@ export function materializeUIMessageChunks(
             rawInput: dynamic ? undefined : chunk.input,
             errorText: stringField(chunk, "errorText"),
             providerExecuted: optionalBoolean(chunk.providerExecuted),
-            callProviderMetadata: providerMetadata(chunk.providerMetadata),
+            ...(stream.format === "UIMessageChunkV7"
+              ? { resultProviderMetadata: metadata }
+              : { callProviderMetadata: metadata }),
             title: optionalString(chunk.title),
+            toolMetadata: toolMetadata(stream, chunk.toolMetadata),
           });
           break;
         }
         case "tool-approval-request": {
-          const invocation = requireToolPart(
-            toolPart(stringField(chunk, "toolCallId")),
-            stringField(chunk, "toolCallId"),
-          );
-          invocation.state = "approval-requested";
-          invocation.approval = { id: stringField(chunk, "approvalId") };
+          if (
+            chunk.isAutomatic !== undefined ||
+            chunk.signature !== undefined
+          ) {
+            requireV7Stream(
+              stream,
+              "tool-approval-request.isAutomatic/signature",
+            );
+          }
+          const toolCallId = stringField(chunk, "toolCallId");
+          const invocation = toolPart(toolCallId);
+          if (
+            !invocation &&
+            stream.format === "UIMessageChunkV7" &&
+            isOrphanTolerantPrefix
+          ) {
+            continue;
+          }
+          const requiredInvocation = requireToolPart(invocation, toolCallId);
+          requiredInvocation.state = "approval-requested";
+          requiredInvocation.approval = {
+            id: stringField(chunk, "approvalId"),
+            isAutomatic: optionalBoolean(chunk.isAutomatic),
+            signature: optionalString(chunk.signature),
+          };
           break;
         }
-        case "tool-approval-response":
-          throw new Error(
-            'materializeUIMessageChunks: persisted chunk type "tool-approval-response" is not part of the pinned AI SDK 6.0.35 UIMessageChunk wire format',
-          );
+        case "tool-approval-response": {
+          requireV7Stream(stream, chunk.type);
+          const approvalId = stringField(chunk, "approvalId");
+          const invocation = toolPartByApprovalId(approvalId);
+          if (
+            !invocation &&
+            stream.format === "UIMessageChunkV7" &&
+            isOrphanTolerantPrefix
+          ) {
+            continue;
+          }
+          const requiredInvocation = requireToolPart(invocation, approvalId);
+          requiredInvocation.state = "approval-responded";
+          requiredInvocation.approval = {
+            id: approvalId,
+            approved: booleanField(chunk, "approved"),
+            reason: optionalString(chunk.reason),
+            isAutomatic: requiredInvocation.approval?.isAutomatic,
+            signature: requiredInvocation.approval?.signature,
+          };
+          requiredInvocation.providerExecuted =
+            optionalBoolean(chunk.providerExecuted) ??
+            requiredInvocation.providerExecuted;
+          requiredInvocation.callProviderMetadata =
+            providerMetadata(chunk.providerMetadata) ??
+            requiredInvocation.callProviderMetadata;
+          break;
+        }
         case "tool-output-denied": {
-          const invocation = requireToolPart(
-            toolPart(stringField(chunk, "toolCallId")),
-            stringField(chunk, "toolCallId"),
-          );
-          invocation.state = "output-denied";
+          const toolCallId = stringField(chunk, "toolCallId");
+          const invocation = toolPart(toolCallId);
+          if (
+            !invocation &&
+            stream.format === "UIMessageChunkV7" &&
+            isOrphanTolerantPrefix
+          ) {
+            continue;
+          }
+          requireToolPart(invocation, toolCallId).state = "output-denied";
           break;
         }
         case "tool-output-available": {
           const toolCallId = stringField(chunk, "toolCallId");
-          const invocation = requireToolPart(toolPart(toolCallId), toolCallId);
-          updateToolPart(invocation.type === "dynamic-tool", {
+          const resultProviderMetadata = v7OnlyProviderMetadata(
+            stream,
+            chunk.providerMetadata,
+            "tool-output-available.providerMetadata",
+          );
+          const invocation = toolPart(toolCallId);
+          if (
+            !invocation &&
+            stream.format === "UIMessageChunkV7" &&
+            isOrphanTolerantPrefix
+          ) {
+            continue;
+          }
+          const requiredInvocation = requireToolPart(invocation, toolCallId);
+          updateToolPart(requiredInvocation.type === "dynamic-tool", {
             toolCallId,
-            toolName: getToolName(invocation),
+            toolName: getToolName(requiredInvocation),
             state: "output-available",
-            input: invocation.input,
+            input: requiredInvocation.input,
             output: chunk.output,
             preliminary: optionalBoolean(chunk.preliminary),
             providerExecuted: optionalBoolean(chunk.providerExecuted),
-            title: invocation.title,
+            resultProviderMetadata,
+            title: requiredInvocation.title,
+            toolMetadata:
+              toolMetadata(stream, chunk.toolMetadata) ??
+              requiredInvocation.toolMetadata,
           });
           break;
         }
         case "tool-output-error": {
           const toolCallId = stringField(chunk, "toolCallId");
-          const invocation = requireToolPart(toolPart(toolCallId), toolCallId);
-          updateToolPart(invocation.type === "dynamic-tool", {
+          const resultProviderMetadata = v7OnlyProviderMetadata(
+            stream,
+            chunk.providerMetadata,
+            "tool-output-error.providerMetadata",
+          );
+          const invocation = toolPart(toolCallId);
+          if (
+            !invocation &&
+            stream.format === "UIMessageChunkV7" &&
+            isOrphanTolerantPrefix
+          ) {
+            continue;
+          }
+          const requiredInvocation = requireToolPart(invocation, toolCallId);
+          updateToolPart(requiredInvocation.type === "dynamic-tool", {
             toolCallId,
-            toolName: getToolName(invocation),
+            toolName: getToolName(requiredInvocation),
             state: "output-error",
-            input: invocation.input,
-            rawInput: invocation.rawInput,
+            input: requiredInvocation.input,
+            rawInput: requiredInvocation.rawInput,
             errorText: stringField(chunk, "errorText"),
             providerExecuted: optionalBoolean(chunk.providerExecuted),
-            title: invocation.title,
+            resultProviderMetadata,
+            title: requiredInvocation.title,
+            toolMetadata:
+              toolMetadata(stream, chunk.toolMetadata) ??
+              requiredInvocation.toolMetadata,
           });
           break;
         }
@@ -437,6 +597,7 @@ export function materializeUIMessageChunks(
           break;
         default:
           if (chunk.type.startsWith("data-") && chunk.transient !== true) {
+            isOrphanTolerantPrefix = false;
             const id = optionalString(chunk.id);
             const existing = id
               ? parts.find(
@@ -453,6 +614,12 @@ export function materializeUIMessageChunks(
                 data: chunk.data,
               });
             }
+          } else if (!chunk.type.startsWith("data-")) {
+            // Transient data parts are persisted but deliberately not
+            // materialised; only genuinely unknown types are an error.
+            throw new Error(
+              `materializeUIMessageChunks: unsupported durable chunk type "${chunk.type}"`,
+            );
           }
           break;
       }
@@ -462,6 +629,9 @@ export function materializeUIMessageChunks(
     // whose tool invocation was persisted in an earlier stream. It returns the
     // materialized prefix and ignores the remaining chunks.
     if (!(error instanceof OrphanToolInvocationError)) throw error;
+    if (stream.format === "UIMessageChunkV7" && !isOrphanTolerantPrefix) {
+      throw error;
+    }
   }
 
   return partsToMessages(parts, stream, metadata);
@@ -575,6 +745,9 @@ function partsToMessages(
           data: part.url,
           filename: part.filename,
           mediaType: part.mediaType,
+          ...(part.providerMetadata
+            ? { providerOptions: part.providerMetadata }
+            : {}),
         });
       } else if (isToolPart(part) && part.state !== "input-streaming") {
         const input =
@@ -588,6 +761,13 @@ function partsToMessages(
           input,
           args: input,
           providerExecuted: part.providerExecuted,
+          ...(stream.format === "UIMessageChunkV7" && part.title !== undefined
+            ? { title: part.title }
+            : {}),
+          ...(stream.format === "UIMessageChunkV7" &&
+          part.toolMetadata !== undefined
+            ? { toolMetadata: part.toolMetadata }
+            : {}),
           ...(part.callProviderMetadata
             ? { providerOptions: part.callProviderMetadata }
             : {}),
@@ -597,6 +777,8 @@ function partsToMessages(
             type: "tool-approval-request",
             approvalId: part.approval.id,
             toolCallId: part.toolCallId,
+            isAutomatic: part.approval.isAutomatic,
+            signature: part.approval.signature,
           });
         }
         if (
@@ -608,6 +790,8 @@ function partsToMessages(
             toolResult(
               part,
               part.state === "output-error" ? "error-json" : "normal",
+              undefined,
+              stream.format === "UIMessageChunk",
             ),
           );
         }
@@ -633,11 +817,32 @@ function partsToMessages(
         // Deliberately access approval like AI SDK 6: a denied chunk without a
         // preceding approval request is malformed rather than silently fixed.
         const reason = part.approval!.reason ?? "Tool execution denied.";
-        toolContent.push(toolResult(part, "denied", reason));
+        toolContent.push(
+          toolResult(
+            part,
+            "denied",
+            reason,
+            stream.format === "UIMessageChunk",
+          ),
+        );
       } else if (part.state === "output-error") {
-        toolContent.push(toolResult(part, "error-text"));
+        toolContent.push(
+          toolResult(
+            part,
+            "error-text",
+            undefined,
+            stream.format === "UIMessageChunk",
+          ),
+        );
       } else if (part.state === "output-available") {
-        toolContent.push(toolResult(part, "normal"));
+        toolContent.push(
+          toolResult(
+            part,
+            "normal",
+            undefined,
+            stream.format === "UIMessageChunk",
+          ),
+        );
       }
     }
     if (toolContent.length > 0) {
@@ -679,6 +884,7 @@ function toolResult(
   part: ToolPart,
   mode: "normal" | "error-text" | "error-json" | "denied",
   deniedReason?: string,
+  legacyCallMetadataFallback = false,
 ): Extract<MessageContentParts, { type: "tool-result" }> {
   const raw =
     mode === "denied"
@@ -694,15 +900,33 @@ function toolResult(
         : typeof raw === "string"
           ? { type: "text" as const, value: raw }
           : { type: "json" as const, value: raw ?? null };
+  const providerOptions =
+    part.resultProviderMetadata ??
+    (legacyCallMetadataFallback ? part.callProviderMetadata : undefined);
   return {
     type: "tool-result",
     toolCallId: part.toolCallId,
     toolName: getToolName(part),
     output,
-    ...(part.callProviderMetadata
-      ? { providerOptions: part.callProviderMetadata }
+    ...(!legacyCallMetadataFallback && part.providerExecuted !== undefined
+      ? { providerExecuted: part.providerExecuted }
       : {}),
+    ...(!legacyCallMetadataFallback && part.title !== undefined
+      ? { title: part.title }
+      : {}),
+    ...(!legacyCallMetadataFallback && part.toolMetadata !== undefined
+      ? { toolMetadata: part.toolMetadata }
+      : {}),
+    ...(providerOptions ? { providerOptions } : {}),
   };
+}
+
+function requireV7Stream(stream: StreamMessage, type: string): void {
+  if (stream.format !== "UIMessageChunkV7") {
+    throw new Error(
+      `persisted chunk type "${type}" is not part of the pinned AI SDK 6.0.35 UIMessageChunk wire format`,
+    );
+  }
 }
 
 function chunkRecord(value: unknown): RecordValue & { type: string } {
@@ -732,11 +956,47 @@ function optionalBoolean(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
 }
 
+function booleanField(record: RecordValue, field: string): boolean {
+  const value = record[field];
+  if (typeof value !== "boolean") {
+    throw new Error(
+      `Persisted UIMessageChunk field ${field} must be a boolean`,
+    );
+  }
+  return value;
+}
+
 function providerMetadata(value: unknown): ProviderMetadata | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as ProviderMetadata)
     : undefined;
 }
+
+function v7OnlyProviderMetadata(
+  stream: StreamMessage,
+  value: unknown,
+  field: string,
+): ProviderMetadata | undefined {
+  if (value !== undefined) requireV7Stream(stream, field);
+  return providerMetadata(value);
+}
+
+function optionalRecord(value: unknown): RecordValue | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as RecordValue)
+    : undefined;
+}
+
+function toolMetadata(
+  stream: StreamMessage,
+  value: unknown,
+): RecordValue | undefined {
+  if (value === undefined) return undefined;
+  requireV7Stream(stream, "toolMetadata");
+  return optionalRecord(value);
+}
+
+
 
 function isToolPart(part: LegacyUIMessagePart): part is ToolPart {
   return part.type === "dynamic-tool" || part.type.startsWith("tool-");

@@ -4,7 +4,7 @@ import { type UIDataTypes, type UIMessageChunk, type UITools } from "ai";
 import type { StreamQuery, StreamQueryArgs } from "./types.js";
 import { type UIMessage } from "../UIMessages.js";
 import {
-  applyUIMessageChunksIncremental,
+  applyPersistedUIMessageChunksIncremental,
   blankUIMessage,
   emptyIncrementalStreamState,
   getParts,
@@ -13,7 +13,7 @@ import {
 } from "../deltas.js";
 import { useDeltaStreams } from "./useDeltaStreams.js";
 
-// Polyfill structuredClone to support readUIMessageStream on ReactNative
+// Polyfill structuredClone for the versioned stream reducers on React Native.
 if (!("structuredClone" in globalThis)) {
   void import("@ungap/structured-clone" as any).then(
     ({ default: structuredClone }) =>
@@ -23,7 +23,7 @@ if (!("structuredClone" in globalThis)) {
 
 /**
  * A hook that fetches streaming messages from a thread and converts them to UIMessages
- * using AI SDK's readUIMessageStream.
+ * using the reducer pinned to each stream's persisted wire-format marker.
  * This ONLY returns streaming UIMessages. To get both full and streaming messages,
  * use `useUIMessages`.
  *
@@ -139,11 +139,13 @@ export function useStreamingUIMessages<
               ];
             }
 
-            const { message, streamState } = applyUIMessageChunksIncremental(
-              base as UIMessage,
-              newParts,
-              prevState,
-            );
+            const { message, streamState } =
+              applyPersistedUIMessageChunksIncremental(
+                base as UIMessage,
+                newParts,
+                prevState,
+                streamMessage.format,
+              );
             message.status = status;
             return [
               streamId,

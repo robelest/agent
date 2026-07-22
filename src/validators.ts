@@ -271,6 +271,10 @@ export const vToolApprovalRequest = v.object({
    * ID of the tool call that the approval request is for.
    */
   toolCallId: v.string(),
+  /** Whether AI SDK 7 resolved the approval automatically. */
+  isAutomatic: v.optional(v.boolean()),
+  /** HMAC binding the approval request to its tool call. */
+  signature: v.optional(v.string()),
   /** @todo Should we continue to include? */
   providerMetadata,
   /** @todo Should we continue to include? */
@@ -616,7 +620,11 @@ export const vStreamMessage = v.object({
     v.literal("aborted"),
   ),
   format: v.optional(
-    v.union(v.literal("UIMessageChunk"), v.literal("TextStreamPart")),
+    v.union(
+      v.literal("UIMessageChunk"),
+      v.literal("UIMessageChunkV7"),
+      v.literal("TextStreamPart"),
+    ),
   ),
   order: v.number(),
   stepOrder: v.number(),

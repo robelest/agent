@@ -92,7 +92,7 @@
     "@ai-sdk/provider": "4.0.3",
     "@ai-sdk/provider-utils": "5.0.10",
     "@convex-dev/eslint-plugin": "^2.0.0",
-    "@convex-dev/rag": "https://pkg.pr.new/get-convex/rag/@convex-dev/rag@104",
+    "@convex-dev/rag": "https://pkg.pr.new/get-convex/rag/@convex-dev/rag@2bd0281",
     "@convex-dev/rate-limiter": "0.3.2",
     "@convex-dev/workflow": "0.4.3",
     "@edge-runtime/vm": "5.0.0",

@@ -501,4 +501,28 @@ describe("materializeUIMessageChunks", () => {
       ],
     });
   });
+
+  it("materializes durable data parts but skips transient ones", () => {
+    const chunks = [
+      { type: "text-start", id: "t1" },
+      { type: "text-delta", id: "t1", delta: "hi" },
+      { type: "text-end", id: "t1" },
+      { type: "data-progress", data: { pct: 50 }, transient: true },
+      { type: "data-citation", data: { source: "s1" } },
+    ];
+
+    // Transient data parts are persisted as deltas but are explicitly not
+    // part of the recovered message; they must not be treated as unsupported.
+    const actual = materializeUIMessageChunks(stream, chunks, {
+      status: "success",
+    });
+    const content = actual.flatMap((m) =>
+      Array.isArray(m.message?.content) ? m.message.content : [],
+    );
+    expect(content).toContainEqual(
+      expect.objectContaining({ type: "text", text: "hi" }),
+    );
+    expect(JSON.stringify(content)).not.toContain("pct");
+    expectValidMessages(actual);
+  });
 });

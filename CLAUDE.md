@@ -113,10 +113,11 @@ Search for these patterns indicating v5 usage:
 - `createTool({ args:` - should be `inputSchema`
 - `createTool({ handler:` - should be `execute`
 - `textEmbeddingModel:` - should be `embeddingModel`
-- `maxSteps:` in generateText/streamText - should be `stopWhen: stepCountIs(N)`
+- `maxSteps:` in generateText/streamText - should be `stopWhen: isStepCount(N)`
 - `mode: "json"` in generateObject - removed in v6
-- `@ai-sdk/*` packages at v1.x or v2.x - should be v3.x
-- Type imports: `LanguageModelV2` → `LanguageModelV3`, `EmbeddingModel<string>` → `EmbeddingModelV3`
+- `@ai-sdk/*` packages below v4.x - should be v4.x
+- Type imports: `LanguageModelV3` → `LanguageModelV4`, `EmbeddingModelV3` → `EmbeddingModelV4`
+- `system:` / `onStepFinish:` / `stepCountIs` - removed in v7, use `instructions:` / `onStepEnd:` / `isStepCount`
 
 ### Step 3: Apply Transformations
 
@@ -163,10 +164,10 @@ await agent.generateText(ctx, { threadId }, {
 })
 
 // AFTER
-import { stepCountIs } from "@convex-dev/agent"
+import { isStepCount } from "@convex-dev/agent"
 await agent.generateText(ctx, { threadId }, {
   prompt: "...",
-  stopWhen: stepCountIs(5)
+  stopWhen: isStepCount(5)
 })
 ```
 
@@ -211,10 +212,10 @@ npm test
 
 ### Common Issues
 
-- **EmbeddingModelV2 vs V3 errors**: Ensure all `@ai-sdk/*` packages are v3.x
+- **Embedding model version errors**: Ensure all `@ai-sdk/*` packages are v4.x
 - **Tool `args` vs `input`**: v6 uses `input` in execute signature (2nd param)
 - **`mimeType` vs `mediaType`**: v6 prefers `mediaType` (backwards compat maintained)
-- **Type import errors**: `LanguageModelV2` is now `LanguageModelV3`, `EmbeddingModel<string>` is now `EmbeddingModelV3` (no longer generic)
+- **Type import errors**: `LanguageModelV3` is now `LanguageModelV4`, `EmbeddingModelV3` is now `EmbeddingModelV4`
 - **generateObject mode errors**: `mode: "json"` was removed in v6 - just remove the mode option
 
 ### New v6 Features to Mention

@@ -190,7 +190,7 @@ For an action that generates or streams text in a thread:
 ```ts
 // Similar to thread.generateText / thread.streamText
 export const getSupport = supportAgent.asTextAction({
-  stopWhen: stepCountIs(10),
+  stopWhen: isStepCount(10),
 });
 ```
 

@@ -20,6 +20,14 @@ logs with
 [Log Streaming](https://docs.convex.dev/production/integrations/log-streams/) to
 allow debugging and searching through Axiom or another logging service.
 
+AI SDK 7 omits request and response bodies by default. Agent requests the
+available bodies when `rawRequestResponseHandler` is configured. Text results
+include `response.messages`; object results may omit it.
+
+Raw provider bodies can contain Convex-reserved field names such as `$schema`.
+Before inserting a body as a Convex object, encode it as a string or recursively
+sanitize reserved `$`-prefixed keys.
+
 ```ts
 const supportAgent = new Agent(components.agent, {
   ...
@@ -47,15 +55,19 @@ const supportAgent = new Agent(components.agent, {
 
 ## Tracing LLM calls with OpenTelemetry
 
-When you pass
-[`experimental_telemetry`](https://ai-sdk.dev/docs/ai-sdk-core/telemetry) to a
-generate or stream call, the AI SDK emits OpenTelemetry spans with the model,
-token usage, prompt, and response.
+AI SDK 7 emits OpenTelemetry spans after you register the `@ai-sdk/otel`
+integration. Install it in your application:
+
+```bash
+pnpm add @ai-sdk/otel
+```
 
 To export them to an OTLP backend, register a tracer provider:
 
 ```ts
 import { trace } from "@opentelemetry/api";
+import { OpenTelemetry } from "@ai-sdk/otel";
+import { registerTelemetry } from "ai";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import {
@@ -77,10 +89,14 @@ const tracerProvider = new BasicTracerProvider({
   ],
 });
 trace.setGlobalTracerProvider(tracerProvider);
+registerTelemetry(
+  new OpenTelemetry({ tracer: trace.getTracer("convex-agent") }),
+);
 ```
 
-Then enable telemetry on the call, and flush the spans before the handler
-returns so their exports are
+Registration enables telemetry for all AI SDK calls. Use the stable `telemetry`
+option to attach a function ID or to opt out for one call. Flush spans before
+the handler returns so their exports are
 [awaited](https://docs.convex.dev/understanding/best-practices/#await-all-promises):
 
 ```ts
@@ -93,8 +109,7 @@ export const generateTextWithTelemetry = action({
       { threadId },
       {
         prompt,
-        experimental_telemetry: {
-          isEnabled: true,
+        telemetry: {
           functionId: "debugging/telemetry",
         },
       },

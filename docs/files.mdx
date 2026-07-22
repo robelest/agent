@@ -118,7 +118,7 @@ await thread.generateText({
   message: {
     role: "user",
     content: [
-      { type: "image", image: imageBytes, mimeType: "image/png" },
+      { type: "file", data: imageBytes, mediaType: "image/png" },
       { type: "text", text: "What is this image?" },
     ],
   },
@@ -152,7 +152,7 @@ await thread.generateText({
   message: {
     role: "user",
     content: [
-      { type: "image", data: url, mimeType: blob.type },
+      { type: "file", data: url, mediaType: blob.type },
       { type: "text", text: "What is this image?" },
     ],
   },

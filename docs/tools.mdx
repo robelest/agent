@@ -31,7 +31,7 @@ tools in a context that is convenient.
 ## Using tools
 
 The Agent component will automatically handle passing tool call results back in
-and re-generating if you pass `stopWhen: stepCountIs(num)` where `num > 1` to
+and re-generating if you pass `stopWhen: isStepCount(num)` where `num > 1` to
 `generateText` or `streamText`.
 
 The tool call and result will be stored as messages in the thread associated
@@ -147,7 +147,7 @@ const llmTool = createTool({
   }),
   handler: async (ctx, args): Promise<string> => {
     const result = await generateText({
-      system: "You are a helpful assistant.",
+      instructions: "You are a helpful assistant.",
       // Pass through all messages from the current generation
       prompt: [...options.messages, { role: "user", content: args.message }],
       model: myLanguageModel,

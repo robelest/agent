@@ -146,9 +146,9 @@ import { SmoothText } from "@convex-dev/agent/react";
 
 ## Consuming the stream yourself with the Agent
 
-You can consume the stream in all the ways you can with the underlying AI SDK -
-for instance iterating over the content, or using
-[`result.toDataStreamResponse()`](https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text#to-data-stream-response).
+You can consume the stream in all the ways supported by the AI SDK, including
+iterating over its content or passing `result.stream` to a stateless response
+helper.
 
 If you are not also saving the deltas, it might look like this:
 
@@ -173,7 +173,11 @@ const result = await agent.streamText(
   { saveStreamDeltas: { returnImmediately: true } },
 );
 
-return result.toUIMessageStreamResponse();
+import { createUIMessageStreamResponse, toUIMessageStream } from "ai";
+
+return createUIMessageStreamResponse({
+  stream: toUIMessageStream({ stream: result.stream }),
+});
 ```
 
 If you don't want to have the Agent involved at all, the next section will show
@@ -197,7 +201,12 @@ distinct `order`, for ordering on the client side.
 import { components } from "./_generated/api";
 import { type ActionCtx } from "./_generated/server";
 import { DeltaStreamer, compressUIMessageChunks } from "@convex-dev/agent";
-import { streamText } from "ai";
+import {
+  streamText,
+  toUIMessageStream,
+  type AsyncIterableStream,
+  type UIMessageChunk,
+} from "ai";
 import { openai } from "@ai-sdk/openai";
 
 async function stream(ctx: ActionCtx, threadId: string, order: number) {
@@ -214,7 +223,7 @@ async function stream(ctx: ActionCtx, threadId: string, order: number) {
     },
     {
       threadId,
-      format: "UIMessageChunk",
+      format: "UIMessageChunkV7",
       order,
       stepOrder: 0,
       userId: undefined,
@@ -234,10 +243,14 @@ async function stream(ctx: ActionCtx, threadId: string, order: number) {
   // We could await here if we wanted to wait for the stream to finish,
   // but instead we have it process asynchronously so we can return a streaming
   // http Response.
-  void streamer.consumeStream(response.toUIMessageStream());
+  void streamer.consumeStream(
+    toUIMessageStream({
+      stream: response.stream,
+    }) as AsyncIterableStream<UIMessageChunk>,
+  );
 
   return {
-    // e.g. to do `response.toTextStreamResponse()` for HTTP streaming.
+    // Pass response.stream to toTextStream/createTextStreamResponse for HTTP.
     response,
     // We don't need this on the client, but with it we can have some clients
     // selectively not stream down deltas when they're using HTTP streaming

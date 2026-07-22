@@ -43,7 +43,7 @@ requiring the LLM to always pass through full context to each tool call. It also
 allows dynamically choosing a model or other options for the Agent.
 
 ```ts
-import { Agent, stepCountIs } from "@convex-dev/agent";
+import { Agent, isStepCount } from "@convex-dev/agent";
 import { type LanguageModel } from "ai";
 import type { ActionCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
@@ -63,7 +63,7 @@ function createAuthorAgent(
       researchCharacter: researchCharacterTool(ctx, bookId),
       writeChapter: writeChapterTool(ctx, bookId),
     },
-    stopWhen: stepCountIs(10),
+    stopWhen: isStepCount(10),
   });
 }
 ```
@@ -196,12 +196,12 @@ returning a text response.
 ## Customizing the agent
 
 The agent by default only needs a `chat` model to be configured. However, for
-vector search, you'll need an `embeddingModel`. A `name` is helpful to
-attribute each message to a specific agent. Other options are defaults that can
-be over-ridden at each LLM call-site.
+vector search, you'll need an `embeddingModel`. A `name` is helpful to attribute
+each message to a specific agent. Other options are defaults that can be
+over-ridden at each LLM call-site.
 
 ```ts
-import { tool, stepCountIs } from "ai";
+import { isStepCount, tool } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod/v3";
 import { Agent, createTool, type Config } from "@convex-dev/agent";
@@ -254,7 +254,7 @@ const supportAgent = new Agent(components.agent, {
   // Used for limiting the number of steps when tool calls are involved.
   // NOTE: if you want tool calls to happen automatically with a single call,
   // you need to set this to something greater than 1 (the default).
-  stopWhen: stepCountIs(5),
+  stopWhen: isStepCount(5),
   ...sharedDefaults,
 });
 ```

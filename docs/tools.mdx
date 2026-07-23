@@ -47,8 +47,8 @@ There are two ways to create a tool that has access to the Convex context.
 ```ts
 export const ideaSearch = createTool({
   description: "Search for ideas in the database",
-  args: z.object({ query: z.string().describe("The query to search for") }),
-  handler: async (ctx, args, options): Promise<Array<Idea>> => {
+  inputSchema: z.object({ query: z.string().describe("The query to search for") }),
+  execute: async (ctx, args, options): Promise<Array<Idea>> => {
     // ctx has agent, userId, threadId, messageId
     // as well as ActionCtx properties like auth, storage, runMutation, and runAction
     const ideas = await ctx.runQuery(api.ideas.searchIdeas, {
@@ -114,9 +114,9 @@ Then, in your tools, you can use the `orgId` field.
 type MyCtx = ToolCtx & { orgId: string };
 
 const myTool = createTool({
-  args: z.object({ ... }),
+  inputSchema: z.object({ ... }),
   description: "...",
-  handler: async (ctx: MyCtx, args) => {
+  execute: async (ctx: MyCtx, args) => {
     // use ctx.orgId
   },
 });
@@ -142,10 +142,10 @@ to the parent thread.
 ```ts
 const llmTool = createTool({
   description: "Ask a question to some LLM",
-  args: z.object({
+  inputSchema: z.object({
     message: z.string().describe("The message to ask the LLM"),
   }),
-  handler: async (ctx, args): Promise<string> => {
+  execute: async (ctx, args, options): Promise<string> => {
     const result = await generateText({
       instructions: "You are a helpful assistant.",
       // Pass through all messages from the current generation
@@ -162,10 +162,10 @@ const llmTool = createTool({
 ```ts
 const agentTool = createTool({
   description: `Ask a question to agent ${agent.name}`,
-  args: z.object({
+  inputSchema: z.object({
     message: z.string().describe("The message to ask the agent"),
   }),
-  handler: async (ctx, args, options): Promise<string> => {
+  execute: async (ctx, args, options): Promise<string> => {
     const { userId } = ctx;
     const { thread } = await agent.createThread(ctx, { userId });
     const result = await thread.generateText(

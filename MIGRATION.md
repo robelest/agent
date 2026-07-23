@@ -1,153 +1,108 @@
-# Migration Guide: v0.3.x to v0.6.0 (AI SDK v6)
+# Migration Guide: v0.6.x to v0.7.0 (AI SDK 7)
 
-This guide helps you upgrade from @convex-dev/agent v0.3.x to v0.6.0.
-
-## Step 1: Update dependencies
-
-Update all AI SDK packages **together** to avoid peer dependency conflicts:
+Agent v0.7 targets AI SDK 7. Upgrade the Agent package, AI SDK core, provider
+utilities, and provider packages together:
 
 ```bash
-npm install @convex-dev/agent@^0.6.0 ai@^6.0.35 @ai-sdk/provider-utils@^4.0.6
+pnpm add @convex-dev/agent@^0.7.0 ai@^7.0.0 \
+  @ai-sdk/provider-utils@^5.0.0 \
+  @ai-sdk/openai@^4.0.0
 ```
 
-### Official AI SDK providers
+Use the corresponding v4 release for other official `@ai-sdk/*` providers.
+Third-party providers must explicitly support AI SDK 7.
 
-Update your AI SDK provider packages to v3.x:
-```bash
-# For OpenAI
-npm install @ai-sdk/openai@^3.0.10
+## Required API changes
 
-# For Anthropic
-npm install @ai-sdk/anthropic@^3.0.13
+### Agent prompts
 
-# For Groq
-npm install @ai-sdk/groq@^3.0.8
+Rename `system` to `instructions`:
 
-# For Google (Gemini)
-npm install @ai-sdk/google@^3.0.8
+```ts
+await agent.generateText(ctx, { threadId }, {
+  instructions: "You are a helpful assistant.",
+  prompt: "Hello",
+});
 ```
 
-### Third-party providers
+### Step control and callbacks
 
-Third-party providers also need updates to be compatible with AI SDK v6:
+AI SDK 7 renamed `stepCountIs` to `isStepCount` and `onStepFinish` to
+`onStepEnd`:
 
-```bash
-# For OpenRouter
-npm install @openrouter/ai-sdk-provider@^2.0.0
+```ts
+import { isStepCount } from "ai";
 
-# For other providers, check their documentation for AI SDK v6 compatibility
+await agent.generateText(ctx, { threadId }, {
+  prompt: "Research this topic",
+  stopWhen: isStepCount(5),
+  onStepEnd: async (step) => {
+    console.log(step.finishReason);
+  },
+});
 ```
 
-### Handling dependency conflicts
+### Tools
 
-If you see peer dependency warnings or errors, try updating all packages at once:
+`createTool` now follows AI SDK 7's `inputSchema` and `execute` names. The
+Agent runtime context is the first argument, followed by validated input and
+the AI SDK execution options:
 
-```bash
-npm install @convex-dev/agent@^0.6.0 ai@^6.0.35 @ai-sdk/openai@^3.0.10 @openrouter/ai-sdk-provider@^2.0.0
-```
-
-If you still have conflicts, you can use `--force` as a last resort:
-
-```bash
-npm install @convex-dev/agent@^0.6.0 --force
-```
-
-> **Note**: Using `--force` can lead to inconsistent dependency trees. After using it, verify your app works correctly and consider running `npm dedupe` to clean up.
-
-## Step 2: Update tool definitions
-
-Replace `parameters` with `inputSchema`:
-
-```typescript
-// Before (v5)
-const myTool = createTool({
-  description: "My tool",
-  parameters: z.object({ query: z.string() }),
-  execute: async (ctx, args) => { ... }
-})
-
-// After (v6)
-const myTool = createTool({
-  description: "My tool",
+```ts
+const search = createTool({
+  description: "Search documents",
   inputSchema: z.object({ query: z.string() }),
-  execute: async (ctx, input, options) => { ... }
-})
+  execute: async (ctx, input, options) => {
+    return await ctx.runQuery(api.documents.search, {
+      query: input.query,
+    });
+  },
+});
 ```
 
-## Step 3: Update Agent config (if using embeddings)
+If you add custom runtime fields, pass them on the generation context and type
+the tool context as before.
 
-```typescript
-// Before
-new Agent(components.agent, {
-  textEmbeddingModel: openai.embedding("text-embedding-3-small")
-})
+### Usage and raw responses
 
-// After
-new Agent(components.agent, {
-  embeddingModel: openai.embedding("text-embedding-3-small")
-})
-```
+Usage now follows AI SDK 7's input/output naming:
 
-## Step 4: Update maxSteps (optional)
+- `inputTokens` replaces prompt-token fields.
+- `outputTokens` replaces completion-token fields.
+- Cache and reasoning counts live under `inputTokenDetails` and
+  `outputTokenDetails`.
 
-```typescript
-// Before
-await agent.generateText(ctx, { threadId }, {
-  prompt: "...",
-  maxSteps: 5
-})
+Raw response bodies are not collected by default. Enable the AI SDK raw-body
+option only where a handler genuinely needs them; doing so can materially
+increase memory use.
 
-// After (maxSteps still works, but stopWhen is preferred)
-import { stepCountIs } from "ai"
-await agent.generateText(ctx, { threadId }, {
-  prompt: "...",
-  stopWhen: stepCountIs(5)
-})
-```
+### Model IDs
 
-## Step 5: Verify
+Both AI SDK 7 language-model objects and registry IDs such as
+`"openai:gpt-4o-mini"` are supported.
+
+## Persisted messages and streams
+
+No data migration is required. New streams are written with the
+`UIMessageChunkV7` marker. Streams written by Agent v0.6 retain their
+`UIMessageChunk` marker and are replayed with the pinned AI SDK 6 semantics, so
+aborted or in-flight streams remain recoverable after deployment.
+
+The persisted message format is additive: AI SDK 7 custom parts,
+reasoning-file parts, and canonical tool-result file parts are retained.
+Provider references and inline text file data round-trip without being
+flattened. Large binary file data uses Agent's tracked Convex file storage and
+participates in the existing reference-count cleanup lifecycle.
+
+## Verification
+
+After updating call sites and reinstalling dependencies, run:
 
 ```bash
-npm run typecheck
-npm test
+vp run typecheck
+vp test
+vp run lint
 ```
 
-## Common Issues
-
-### EmbeddingModelV2 vs EmbeddingModelV3 type errors
-Ensure all `@ai-sdk/*` packages are updated to v3.x. Older versions use AI SDK v5 types.
-
-### Tool `args` vs `input`
-AI SDK v6 renamed `args` to `input` in tool calls. The library maintains backwards compatibility, but you may see this in types.
-
-### `mimeType` vs `mediaType`
-AI SDK v6 renamed `mimeType` to `mediaType`. Backwards compatibility is maintained.
-
-### Peer dependency conflicts
-
-If you see errors like:
-```
-npm error ERESOLVE unable to resolve dependency tree
-npm error peer ai@"^5.0.0" from @openrouter/ai-sdk-provider@1.0.3
-```
-
-This means a third-party provider needs updating. Common solutions:
-
-1. **Update the provider** to a version compatible with AI SDK v6
-2. **Check npm** for the latest version: `npm view @openrouter/ai-sdk-provider versions`
-3. **Use `--force`** if a compatible version isn't available yet (temporary workaround)
-
-### Third-party provider compatibility
-
-| Provider | AI SDK v5 (ai@5.x) | AI SDK v6 (ai@6.x) |
-|----------|-------------------|-------------------|
-| @openrouter/ai-sdk-provider | v1.x | v2.x |
-| @ai-sdk/openai | v1.x-v2.x | v3.x |
-| @ai-sdk/anthropic | v1.x-v2.x | v3.x |
-| @ai-sdk/groq | v1.x-v2.x | v3.x |
-| @ai-sdk/google | v1.x-v2.x | v3.x |
-
-## More Information
-
-- [AI SDK v6 Migration Guide](https://ai-sdk.dev/docs/migration-guides/migration-guide-6-0)
-- [Convex Agent Documentation](https://docs.convex.dev/agents)
+For the upstream SDK changes, see the
+[AI SDK 7 migration guide](https://ai-sdk.dev/docs/migration-guides/migration-guide-7-0).

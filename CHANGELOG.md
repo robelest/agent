@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.0
+
+- Breaking: upgrade the Vercel adapter to AI SDK 7 and official provider
+  packages v4.
+- Preserve AI SDK 7 custom content, reasoning files, canonical tool-result
+  files, runtime tool context, usage details, and string registry model IDs.
+- Version persisted UI streams while retaining pinned recovery for streams
+  written by Agent v0.6.
+- See [MIGRATION.md](./MIGRATION.md) for required call-site changes.
+
 ## 0.6.4
 
 - Fix streaming UI message dedupe (#281)

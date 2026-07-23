@@ -605,12 +605,12 @@ function applyUIMessageChunksForFormat(
         break;
       default: {
         if (typeof part.type === "string" && part.type.startsWith("data-")) {
-          hasLocallyAnchoredPart = true;
           const dataPart = part as Extract<
             UIMessageChunk,
             { type: `data-${string}` }
           >;
           if ("transient" in dataPart && dataPart.transient === true) break;
+          hasLocallyAnchoredPart = true;
           const existingIdx =
             dataPart.id != null
               ? message.parts.findIndex(

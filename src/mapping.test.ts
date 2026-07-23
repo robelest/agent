@@ -113,6 +113,155 @@ describe("mapping", () => {
     expect(roundtrip).toMatchObject(toolResult);
   });
 
+  test("AI SDK 7 custom and reasoning-file parts round-trip", async () => {
+    const input: ModelMessage = {
+      role: "assistant",
+      content: [
+        {
+          type: "custom",
+          kind: "openai.compaction",
+          providerOptions: { openai: { itemId: "custom-1" } },
+        },
+        {
+          type: "reasoning-file",
+          data: { type: "url", url: new URL("https://example.com/trace.bin") },
+          mediaType: "application/octet-stream",
+          providerOptions: { openai: { itemId: "reasoning-1" } },
+        },
+      ],
+    };
+
+    const { message } = await serializeMessage(
+      {} as ActionCtx,
+      {} as AgentComponent,
+      input,
+    );
+
+    expect(validate(vMessage, message)).toBe(true);
+    expect(message.content).toEqual([
+      {
+        type: "custom",
+        kind: "openai.compaction",
+        providerOptions: { openai: { itemId: "custom-1" } },
+      },
+      {
+        type: "reasoning-file",
+        data: { type: "url", url: "https://example.com/trace.bin" },
+        mediaType: "application/octet-stream",
+        providerOptions: { openai: { itemId: "reasoning-1" } },
+      },
+    ]);
+    expect(toModelMessage(message)).toEqual(input);
+  });
+
+  test("canonical AI SDK 7 tool-result files round-trip", async () => {
+    const input: ModelMessage = {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "tool-call-id",
+          toolName: "lookup",
+          output: {
+            type: "content",
+            value: [
+              {
+                type: "file",
+                data: {
+                  type: "url",
+                  url: new URL("https://example.com/result.pdf"),
+                },
+                mediaType: "application/pdf",
+                filename: "result.pdf",
+              },
+              {
+                type: "file",
+                data: {
+                  type: "reference",
+                  reference: { openai: "file_123" },
+                },
+                mediaType: "application/pdf",
+              },
+              {
+                type: "file",
+                data: { type: "text", text: "inline" },
+                mediaType: "text/plain",
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const { message } = await serializeMessage(
+      {} as ActionCtx,
+      {} as AgentComponent,
+      input,
+    );
+
+    expect(validate(vMessage, message)).toBe(true);
+    expect(toModelMessage(message)).toEqual(input);
+  });
+
+  test("large canonical tool-result files use tracked storage", async () => {
+    const bytes = new Uint8Array(1024 * 65).fill(7);
+    const ctx = {
+      runAction: async () => undefined,
+      runMutation: async () => ({
+        fileId: "file-123",
+        storageId: "storage-123",
+      }),
+      storage: {
+        store: async () => "storage-123",
+        getUrl: async () => "https://example.com/stored-file",
+        delete: async () => undefined,
+      },
+    } as unknown as ActionCtx;
+    const input: ModelMessage = {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "tool-call-id",
+          toolName: "lookup",
+          output: {
+            type: "content",
+            value: [
+              {
+                type: "file",
+                data: { type: "data", data: bytes },
+                mediaType: "application/octet-stream",
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const { message, fileIds } = await serializeMessage(
+      ctx,
+      api as unknown as AgentComponent,
+      input,
+    );
+
+    expect(fileIds).toEqual(["file-123"]);
+    expect(message.content).toMatchObject([
+      {
+        output: {
+          value: [
+            {
+              type: "file",
+              data: {
+                type: "url",
+                url: "https://example.com/stored-file",
+              },
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
   test("tool results get normalized to output", async () => {
     const toolResult = {
       type: "tool-result" as const,

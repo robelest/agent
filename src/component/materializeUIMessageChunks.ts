@@ -326,12 +326,24 @@ export function materializeUIMessageChunks(
           break;
         }
         case "reasoning-file":
+          requireV7Stream(stream, chunk.type);
+          isOrphanTolerantPrefix = false;
+          parts.push({
+            type: "reasoning-file",
+            url: stringField(chunk, "url"),
+            mediaType: stringField(chunk, "mediaType"),
+            providerMetadata: providerMetadata(chunk.providerMetadata),
+          });
+          break;
         case "custom":
-          // The canonical message format has no slot for these yet; persisting
-          // them is a separate, additive change.
-          throw new Error(
-            `materializeUIMessageChunks: AI SDK 7 ${chunk.type} chunks cannot be represented in the Agent v1 message format`,
-          );
+          requireV7Stream(stream, chunk.type);
+          isOrphanTolerantPrefix = false;
+          parts.push({
+            type: "custom",
+            kind: stringField(chunk, "kind"),
+            providerMetadata: providerMetadata(chunk.providerMetadata),
+          });
+          break;
         case "source-url":
           isOrphanTolerantPrefix = false;
           parts.push({
@@ -709,6 +721,8 @@ function partsToMessages(
       part.type === "text" ||
       part.type === "reasoning" ||
       part.type === "file" ||
+      part.type === "reasoning-file" ||
+      part.type === "custom" ||
       isToolPart(part) ||
       part.type.startsWith("data-")
     ) {
@@ -745,6 +759,23 @@ function partsToMessages(
           data: part.url,
           filename: part.filename,
           mediaType: part.mediaType,
+          ...(part.providerMetadata
+            ? { providerOptions: part.providerMetadata }
+            : {}),
+        });
+      } else if (part.type === "reasoning-file") {
+        assistantContent.push({
+          type: "reasoning-file",
+          data: { type: "url", url: part.url },
+          mediaType: part.mediaType,
+          ...(part.providerMetadata
+            ? { providerOptions: part.providerMetadata }
+            : {}),
+        });
+      } else if (part.type === "custom") {
+        assistantContent.push({
+          type: "custom",
+          kind: part.kind,
           ...(part.providerMetadata
             ? { providerOptions: part.providerMetadata }
             : {}),

@@ -57,21 +57,17 @@ export type {
 /**
  * Type-level check that ensures models are from AI SDK v7.
  */
-type AssertAISDKv7<T> = T extends { specificationVersion: "v4" }
+type AssertAISDKv7<T> = T extends string
   ? T
-  : "⚠️ @convex-dev/agent requires AI SDK v7. Update your dependencies: npm install ai@^7.0.0 @ai-sdk/openai@^4.0.0 (or other provider).";
+  : T extends { specificationVersion: "v4" }
+    ? T
+    : "⚠️ @convex-dev/agent requires AI SDK v7. Update your dependencies: npm install ai@^7.0.0 @ai-sdk/openai@^4.0.0 (or other provider).";
 
 export type AgentPrompt = {
   /**
    * Instructions to include in the prompt. Overwrites Agent instructions.
    */
   instructions?: Instructions;
-  /**
-   * System message to include in the prompt. Overwrites Agent instructions.
-   *
-   * @deprecated Use `instructions` instead.
-   */
-  system?: string;
   /**
    * A prompt. It can be either a text prompt or a list of messages.
    * If used with `promptMessageId`, it will be used in place of that
@@ -106,7 +102,7 @@ export type AgentPrompt = {
    * The model to use for the LLM calls. This will override the languageModel
    * specified in the Agent config.
    */
-  model?: LanguageModel;
+  model?: AssertAISDKv7<LanguageModel>;
 };
 
 export type Config = {

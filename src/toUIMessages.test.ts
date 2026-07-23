@@ -1,6 +1,6 @@
 import { assert } from "convex-helpers";
 import { describe, expect, it } from "vitest";
-import { toUIMessages } from "./vercel/UIMessages.js";
+import { fromUIMessages, toUIMessages } from "./vercel/UIMessages.js";
 import type { MessageDoc } from "./validators.js";
 
 // Helper to create a base message doc
@@ -54,6 +54,66 @@ describe("toUIMessages", () => {
       text: "Hi, how can I help?",
       state: "done",
     });
+  });
+
+  it("round-trips AI SDK 7 custom and reasoning-file UI parts", async () => {
+    const [uiMessage] = toUIMessages([
+      baseMessageDoc({
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "custom",
+              kind: "openai.compaction",
+              providerOptions: { openai: { itemId: "custom-1" } },
+            },
+            {
+              type: "reasoning-file",
+              data: {
+                type: "url",
+                url: "https://example.com/reasoning.bin",
+              },
+              mediaType: "application/octet-stream",
+              providerOptions: { openai: { itemId: "reasoning-1" } },
+            },
+          ],
+        },
+      }),
+    ]);
+
+    expect(uiMessage.parts).toEqual([
+      {
+        type: "custom",
+        kind: "openai.compaction",
+        providerMetadata: { openai: { itemId: "custom-1" } },
+      },
+      {
+        type: "reasoning-file",
+        mediaType: "application/octet-stream",
+        url: "https://example.com/reasoning.bin",
+        providerMetadata: { openai: { itemId: "reasoning-1" } },
+      },
+    ]);
+
+    const [roundTrip] = await fromUIMessages([uiMessage], {
+      threadId: "thread1",
+    });
+    expect(roundTrip.message?.content).toEqual([
+      {
+        type: "custom",
+        kind: "openai.compaction",
+        providerOptions: { openai: { itemId: "custom-1" } },
+      },
+      {
+        type: "reasoning-file",
+        data: {
+          type: "url",
+          url: "https://example.com/reasoning.bin",
+        },
+        mediaType: "application/octet-stream",
+        providerOptions: { openai: { itemId: "reasoning-1" } },
+      },
+    ]);
   });
 
   it("handles multiple messages", () => {

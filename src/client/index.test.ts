@@ -90,7 +90,6 @@ const saveStepAgent = new Agent(components.agent, {
 });
 
 let boundaryOnStepEndCalls = 0;
-let boundaryOnStepFinishCalls = 0;
 let boundaryThrowingCallbackCalls = 0;
 let boundaryRawRequestBody: unknown;
 let boundaryRawResponseBody: unknown;
@@ -249,7 +248,6 @@ export const exerciseV7Boundary = action({
   args: {},
   handler: async (ctx) => {
     boundaryOnStepEndCalls = 0;
-    boundaryOnStepFinishCalls = 0;
     boundaryThrowingCallbackCalls = 0;
     boundaryRawRequestBody = undefined;
     boundaryRawResponseBody = undefined;
@@ -271,12 +269,6 @@ export const exerciseV7Boundary = action({
       },
     });
     const providerPrompt = boundaryModel.doGenerateCalls.at(-1)?.prompt ?? [];
-    await thread.generateText({
-      prompt: "legacy callback",
-      onStepFinish: () => {
-        boundaryOnStepFinishCalls += 1;
-      },
-    });
     try {
       await thread.generateText({
         prompt: "callback error",
@@ -295,7 +287,6 @@ export const exerciseV7Boundary = action({
     });
     return {
       boundaryOnStepEndCalls,
-      boundaryOnStepFinishCalls,
       boundaryThrowingCallbackCalls,
       hasStoredSystemMessage: providerPrompt.some(
         (message) =>
@@ -517,13 +508,12 @@ describe("Agent thick client", () => {
     const result = await t.action(testApi.exerciseV7Boundary, {});
     expect(result).toEqual({
       boundaryOnStepEndCalls: 1,
-      boundaryOnStepFinishCalls: 1,
       boundaryThrowingCallbackCalls: 1,
       hasStoredSystemMessage: true,
       hasRequestInstructions: true,
       rawRequestIncluded: true,
       rawResponseIncluded: true,
-      assistantMessages: 3,
+      assistantMessages: 2,
       pendingMessages: 0,
     });
   });
@@ -606,6 +596,14 @@ describe("Agent option variations and normal behavior", () => {
     const a = new Agent(components.agent, {
       name: "minimal",
       languageModel: mockModel(),
+    });
+    expect(a).toBeInstanceOf(Agent);
+  });
+
+  test("Agent accepts an AI SDK registry model ID", () => {
+    const a = new Agent(components.agent, {
+      name: "registry-model",
+      languageModel: "openai:gpt-4o-mini",
     });
     expect(a).toBeInstanceOf(Agent);
   });

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  applyPersistedUIMessageChunksIncremental,
   applyUIMessageChunksIncremental,
   blankUIMessage,
   emptyIncrementalStreamState,
@@ -157,6 +158,39 @@ describe("UIMessageChunks", () => {
 });
 
 describe("UIMessageChunks - continuation stream", () => {
+  it("does not let transient data anchor an orphan continuation", () => {
+    const uiMessage = blankUIMessage(
+      {
+        streamId: "continuation-stream",
+        status: "streaming",
+        order: 1,
+        stepOrder: 0,
+        format: "UIMessageChunkV7",
+      },
+      "thread1",
+    );
+
+    const { message } = applyPersistedUIMessageChunksIncremental(
+      uiMessage,
+      [
+        {
+          type: "data-progress",
+          data: { percent: 50 },
+          transient: true,
+        },
+        {
+          type: "tool-output-available",
+          toolCallId: "prior-stream-call",
+          output: "done",
+        },
+      ] as UIMessageChunk[],
+      emptyIncrementalStreamState(),
+      "UIMessageChunkV7",
+    );
+
+    expect(message.parts).toEqual([]);
+  });
+
   it("gracefully handles tool-result without tool-call in continuation stream after approval", async () => {
     // This simulates what happens after tool approval:
     // Stream A: tool-call, tool-approval-request -> finishes

@@ -12,7 +12,10 @@ import {
   type ToolUIPart,
   type UIDataTypes,
   type UITools,
+  type CustomContentUIPart,
+  type ReasoningFileUIPart,
 } from "ai";
+import { convertUint8ArrayToBase64 } from "@ai-sdk/provider-utils";
 import type { Infer } from "convex/values";
 import { toModelMessage, fromModelMessage, toUIFilePart } from "./mapping.js";
 import {
@@ -497,6 +500,21 @@ function createAssistantUIMessage<
             ...contentPart,
           } satisfies ReasoningUIPart);
           break;
+        case "reasoning-file":
+          allParts.push({
+            type: "reasoning-file",
+            mediaType: contentPart.mediaType,
+            url: reasoningFileUrl(contentPart),
+            providerMetadata: contentPart.providerOptions,
+          } satisfies ReasoningFileUIPart);
+          break;
+        case "custom":
+          allParts.push({
+            type: "custom",
+            kind: contentPart.kind,
+            providerMetadata: contentPart.providerOptions,
+          } satisfies CustomContentUIPart);
+          break;
         case "file":
         case "image":
           allParts.push(toUIFilePart(contentPart));
@@ -776,6 +794,33 @@ function createAssistantUIMessage<
     parts: allParts,
     metadata: group.find((m) => m.metadata)?.metadata,
   };
+}
+
+function reasoningFileUrl(part: {
+  data: unknown;
+  mediaType: string;
+}): string {
+  let data = part.data;
+  if (data && typeof data === "object" && "type" in data) {
+    if (data.type === "url" && "url" in data) {
+      return String(data.url);
+    }
+    if (data.type === "data" && "data" in data) {
+      data = data.data;
+    }
+  }
+  if (data instanceof URL) return data.toString();
+  if (typeof data === "string") {
+    return data.startsWith("data:")
+      ? data
+      : `data:${part.mediaType};base64,${data}`;
+  }
+  if (data instanceof ArrayBuffer || data instanceof Uint8Array) {
+    const bytes =
+      data instanceof Uint8Array ? data : new Uint8Array(data);
+    return `data:${part.mediaType};base64,${convertUint8ArrayToBase64(bytes)}`;
+  }
+  throw new Error("Unsupported reasoning-file data");
 }
 
 function toSourcePart(

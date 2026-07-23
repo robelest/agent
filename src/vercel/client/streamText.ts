@@ -182,7 +182,7 @@ export async function streamText<
       } else {
         await call.save({ step }, createPendingMessage);
       }
-      return (streamTextArgs.onStepEnd ?? streamTextArgs.onStepFinish)?.(step);
+      return streamTextArgs.onStepEnd?.(step);
     },
   } as Parameters<typeof streamTextAi<TOOLS, RUNTIME_CONTEXT, OUTPUT>>[0]);
   const stream = streamer?.consumeStream(

@@ -82,10 +82,7 @@ export async function startGeneration<
      *   the promptMessageId message, if provided.
      */
     messages?: (ModelMessage | Message)[];
-    /** Canonical AI SDK instructions for the request. */
     instructions?: Instructions;
-    /** @deprecated Use `instructions`. */
-    system?: Instructions;
     /** Whether system messages may remain in the message history. */
     allowSystemInMessages?: boolean;
     /** Optional AI SDK result/body inclusion controls. */
@@ -231,12 +228,11 @@ export async function startGeneration<
       "messages",
       "prompt",
       "instructions",
-      "system",
       "include",
     ]),
     model,
     messages: context.messages,
-    instructions: args.instructions ?? args.system,
+    instructions: args.instructions,
     allowSystemInMessages: args.allowSystemInMessages ?? true,
     ...(include ? { include } : {}),
     stopWhen:

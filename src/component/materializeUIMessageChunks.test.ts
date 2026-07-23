@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { pick } from "convex-helpers";
 import { validate } from "convex-helpers/validators";
 import {
+  type MessageContentParts,
   type MessageWithMetadataInternal,
   type StreamDelta,
   type StreamMessage,
@@ -207,7 +208,9 @@ describe("materializeUIMessageChunks", () => {
     // decoder must keep reproducing what v6 stored.
     const denial = actual
       .flatMap((message) =>
-        Array.isArray(message.message?.content) ? message.message.content : [],
+        Array.isArray(message.message?.content)
+          ? (message.message.content as MessageContentParts[])
+          : [],
       )
       .find((part) => part.type === "tool-result" && part.output);
     expect(denial).toMatchObject({
@@ -517,12 +520,53 @@ describe("materializeUIMessageChunks", () => {
       status: "success",
     });
     const content = actual.flatMap((m) =>
-      Array.isArray(m.message?.content) ? m.message.content : [],
+      Array.isArray(m.message?.content)
+        ? (m.message.content as MessageContentParts[])
+        : [],
     );
     expect(content).toContainEqual(
       expect.objectContaining({ type: "text", text: "hi" }),
     );
     expect(JSON.stringify(content)).not.toContain("pct");
+    expectValidMessages(actual);
+  });
+
+  it("materializes AI SDK 7 custom and reasoning-file chunks", () => {
+    const actual = materializeUIMessageChunks(
+      { ...stream, format: "UIMessageChunkV7" },
+      [
+        {
+          type: "custom",
+          kind: "openai.compaction",
+          providerMetadata: { openai: { itemId: "custom-1" } },
+        },
+        {
+          type: "reasoning-file",
+          url: "https://example.com/reasoning.bin",
+          mediaType: "application/octet-stream",
+          providerMetadata: { openai: { itemId: "reasoning-1" } },
+        },
+      ],
+      { status: "success" },
+    );
+
+    expect(actual).toHaveLength(1);
+    expect(actual[0]?.message.content).toEqual([
+      {
+        type: "custom",
+        kind: "openai.compaction",
+        providerOptions: { openai: { itemId: "custom-1" } },
+      },
+      {
+        type: "reasoning-file",
+        data: {
+          type: "url",
+          url: "https://example.com/reasoning.bin",
+        },
+        mediaType: "application/octet-stream",
+        providerOptions: { openai: { itemId: "reasoning-1" } },
+      },
+    ]);
     expectValidMessages(actual);
   });
 });

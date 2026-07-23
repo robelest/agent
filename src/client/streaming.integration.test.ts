@@ -34,7 +34,7 @@ const testMetadata = {
   model: "test model",
   provider: "test provider",
   providerOptions: {},
-  format: "UIMessageChunk" as const,
+  format: "UIMessageChunkV7" as const,
 };
 
 // ============================================================================
@@ -801,21 +801,21 @@ describe("Fallback Behavior", () => {
       order: 0,
       stepOrder: 0,
       status: "streaming",
-      format: "UIMessageChunk",
+      format: "UIMessageChunkV7",
     };
     const finishedMsg: StreamMessage = {
       streamId: "s2",
       order: 1,
       stepOrder: 0,
       status: "finished",
-      format: "UIMessageChunk",
+      format: "UIMessageChunkV7",
     };
     const abortedMsg: StreamMessage = {
       streamId: "s3",
       order: 2,
       stepOrder: 0,
       status: "aborted",
-      format: "UIMessageChunk",
+      format: "UIMessageChunkV7",
     };
 
     const msgs = await deriveUIMessagesFromDeltas(

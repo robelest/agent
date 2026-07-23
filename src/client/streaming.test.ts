@@ -27,7 +27,7 @@ const testMetadata = {
   model: "test model",
   provider: "test provider",
   providerOptions: {},
-  format: "UIMessageChunk" as const,
+  format: "UIMessageChunkV7" as const,
 };
 
 describe("DeltaStreamer", () => {

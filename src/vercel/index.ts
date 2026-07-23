@@ -116,8 +116,6 @@ import {
 } from "./client/utils.js";
 
 export { isStepCount } from "ai";
-/** @deprecated Use `isStepCount` instead. */
-export { stepCountIs } from "ai";
 export { hasSuccessfulToolCall };
 export {
   docsToModelMessages,
@@ -480,8 +478,7 @@ export class Agent<
       {
         ...args,
         tools: (args.tools ?? this.options.tools) as Tools,
-        instructions:
-          args.instructions ?? args.system ?? this.options.instructions,
+        instructions: args.instructions ?? this.options.instructions,
         stopWhen: (args.stopWhen ?? this.options.stopWhen) as any,
       },
       {
@@ -549,9 +546,7 @@ export class Agent<
         onStepEnd: async (step) => {
           steps.push(step);
           await call.save({ step }, await willContinue(steps, args.stopWhen));
-          return (
-            generateTextArgs.onStepEnd ?? generateTextArgs.onStepFinish
-          )?.(step);
+          return generateTextArgs.onStepEnd?.(step);
         },
       })) as GenerateTextResult<Tools, RUNTIME_CONTEXT, OUTPUT>;
       const metadata: GenerationOutputMetadata = {
@@ -620,10 +615,7 @@ export class Agent<
         ...streamTextArgs,
         model: streamTextArgs.model ?? this.options.languageModel,
         tools: (streamTextArgs.tools ?? this.options.tools) as Tools,
-        instructions:
-          streamTextArgs.instructions ??
-          streamTextArgs.system ??
-          this.options.instructions,
+        instructions: streamTextArgs.instructions ?? this.options.instructions,
         stopWhen: (streamTextArgs.stopWhen ?? this.options.stopWhen) as any,
       } as Parameters<typeof streamText<Tools, OUTPUT, RUNTIME_CONTEXT>>[2],
       {

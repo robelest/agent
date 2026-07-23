@@ -60,6 +60,30 @@ export const vFilePart = v.object({
   providerMetadata,
 });
 
+/**
+ * Convex-serializable representation of AI SDK 7's tagged `FileData`.
+ * URLs are stored as strings and binary data as Convex bytes.
+ */
+export const vFileData = v.union(
+  v.object({
+    type: v.literal("data"),
+    data: v.union(v.string(), v.bytes()),
+  }),
+  v.object({
+    type: v.literal("url"),
+    url: v.string(),
+  }),
+  v.object({
+    type: v.literal("reference"),
+    reference: v.record(v.string(), v.string()),
+  }),
+  v.object({
+    type: v.literal("text"),
+    text: v.string(),
+  }),
+);
+export type StoredFileData = Infer<typeof vFileData>;
+
 export const vUserContent = v.union(
   v.string(),
   v.array(v.union(vTextPart, vImagePart, vFilePart)),
@@ -76,6 +100,21 @@ export const vReasoningPart = v.object({
 export const vRedactedReasoningPart = v.object({
   type: v.literal("redacted-reasoning"),
   data: v.string(),
+  providerOptions,
+  providerMetadata,
+});
+
+export const vReasoningFilePart = v.object({
+  type: v.literal("reasoning-file"),
+  data: vFileData,
+  mediaType: v.string(),
+  providerOptions,
+  providerMetadata,
+});
+
+export const vCustomPart = v.object({
+  type: v.literal("custom"),
+  kind: v.string(),
   providerOptions,
   providerMetadata,
 });
@@ -183,6 +222,13 @@ export const vToolResultOutput = v.union(
           type: v.literal("media"),
           data: v.string(),
           mediaType: v.string(),
+        }),
+        v.object({
+          type: v.literal("file"),
+          data: vFileData,
+          mediaType: v.string(),
+          filename: v.optional(v.string()),
+          providerOptions,
         }),
         v.object({
           type: v.literal("file-data"),
@@ -338,6 +384,8 @@ export const vAssistantContent = v.union(
       vTextPart,
       vFilePart,
       vReasoningPart,
+      vReasoningFilePart,
+      vCustomPart,
       vRedactedReasoningPart,
       vToolCallPart,
       vToolResultPart,
@@ -387,6 +435,8 @@ export type MessageContentParts =
   | Infer<typeof vImagePart>
   | Infer<typeof vFilePart>
   | Infer<typeof vReasoningPart>
+  | Infer<typeof vReasoningFilePart>
+  | Infer<typeof vCustomPart>
   | Infer<typeof vRedactedReasoningPart>
   | Infer<typeof vToolCallPart>
   | Infer<typeof vToolResultPart>
@@ -523,8 +573,6 @@ const vPromptFields = {
   instructions: v.optional(
     v.union(v.string(), vSystemMessage, v.array(vSystemMessage)),
   ),
-  /** @deprecated Use `instructions` instead. */
-  system: v.optional(v.string()),
   prompt: v.optional(v.string()),
   messages: v.optional(v.array(vMessage)),
   promptMessageId: v.optional(v.string()),

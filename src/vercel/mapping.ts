@@ -29,6 +29,8 @@ import {
   type vImagePart,
   type vReasoningPart,
   type vRedactedReasoningPart,
+  type vReasoningFilePart,
+  type vCustomPart,
   type vTextPart,
   type vToolCallPart,
   type vToolResultPart,
@@ -37,6 +39,7 @@ import {
   type MessageDoc,
   vToolApprovalRequest,
   vToolApprovalResponse,
+  type StoredFileData,
 } from "../validators.js";
 import type { ActionCtx, AgentComponent } from "./client/types.js";
 import type { MutationCtx } from "./client/types.js";
@@ -45,9 +48,11 @@ import type { Infer } from "convex/values";
 import {
   convertUint8ArrayToBase64,
   type FileData,
+  type CustomPart,
   type ProviderOptions,
   type ProviderReference,
   type ReasoningPart,
+  type ReasoningFilePart,
   type ToolResultOutput,
 } from "@ai-sdk/provider-utils";
 import { parse, validate } from "convex-helpers/validators";
@@ -315,14 +320,8 @@ export async function serializeResponseMessages<TOOLS extends ToolSet>(
 }
 
 /**
- * Serialize the new response messages produced by this step.
- *
- * `step.response.messages` is cumulative across steps in AI SDK v6 — each
- * step's array contains all messages from prior steps too. Pass
- * `previousResponseMessageCount` (the prior step's `response.messages.length`,
- * or `0` for the first step) so we slice only the new tail. The parameter is
- * required: defaulting it would silently duplicate every prior message on
- * every multi-step save.
+ * @deprecated AI SDK 7 callers should pass the response message slice directly
+ * to `serializeResponseMessages`.
  */
 export async function serializeNewMessagesInStep<TOOLS extends ToolSet>(
   ctx: ActionCtx,
@@ -334,19 +333,14 @@ export async function serializeNewMessagesInStep<TOOLS extends ToolSet>(
   const newMessages = step.response.messages.slice(
     previousResponseMessageCount,
   );
-  // Keep at least one message in the output so the step still anchors an
-  // order slot — downstream `addMessages` relies on each step contributing a
-  // row even when AI SDK produced no response messages.
-  const messagesToSerialize: ModelMessage[] =
-    newMessages.length > 0
-      ? newMessages
-      : [{ role: "assistant" as const, content: [] }];
   return serializeStepMessages(
     ctx,
     component,
     step,
     model,
-    messagesToSerialize,
+    newMessages.length > 0
+      ? newMessages
+      : [{ role: "assistant" as const, content: [] }],
   );
 }
 
@@ -365,10 +359,10 @@ async function serializeStepMessages<TOOLS extends ToolSet>(
     provider: model ? getProviderName(model) : undefined,
     providerMetadata: step.providerMetadata,
     reasoning: step.reasoningText,
-    // AI SDK 7 adds `reasoning-file` to step.reasoning. The v1 format has no
-    // slot for it; persisting it is a durable-format change (see PR-2).
+    // Reasoning files live in canonical assistant message content. Keep this
+    // legacy convenience field text-only so binary content is not duplicated.
     reasoningDetails: step.reasoning.filter(
-      (part) => part.type !== "reasoning-file",
+      (part) => part.type === "reasoning",
     ),
     usage: serializeUsage(step.usage),
     warnings: serializeWarnings(step.warnings),
@@ -518,7 +512,13 @@ export async function serializeContent(
           } satisfies Infer<typeof vToolCallPart>;
         }
         case "tool-result": {
-          return normalizeToolResult(part, metadata);
+          return await serializeToolResult(
+            ctx,
+            component,
+            part,
+            metadata,
+            fileIds,
+          );
         }
         case "reasoning": {
           return {
@@ -526,6 +526,27 @@ export async function serializeContent(
             text: part.text,
             ...metadata,
           } satisfies Infer<typeof vReasoningPart>;
+        }
+        case "reasoning-file": {
+          return {
+            type: part.type,
+            data: await serializeAndStoreFileData(
+              ctx,
+              component,
+              part.data,
+              part.mediaType,
+              fileIds,
+            ),
+            mediaType: part.mediaType,
+            ...metadata,
+          } satisfies Infer<typeof vReasoningFilePart>;
+        }
+        case "custom": {
+          return {
+            type: part.type,
+            kind: part.kind,
+            ...metadata,
+          } satisfies Infer<typeof vCustomPart>;
         }
         // Not in current generation output, but could be in historical messages
         case "redacted-reasoning": {
@@ -614,13 +635,26 @@ export function fromModelMessageContent(content: Content): Message["content"] {
             ...metadata,
           } satisfies Infer<typeof vToolCallPart>;
         case "tool-result":
-          return normalizeToolResult(part, metadata);
+          return serializeToolResultWithoutStorage(part, metadata);
         case "reasoning":
           return {
             type: part.type,
             text: part.text,
             ...metadata,
           } satisfies Infer<typeof vReasoningPart>;
+        case "reasoning-file":
+          return {
+            type: part.type,
+            data: serializeFileData(part.data),
+            mediaType: part.mediaType,
+            ...metadata,
+          } satisfies Infer<typeof vReasoningFilePart>;
+        case "custom":
+          return {
+            type: part.type,
+            kind: part.kind,
+            ...metadata,
+          } satisfies Infer<typeof vCustomPart>;
         case "tool-approval-request":
           return {
             type: part.type,
@@ -698,7 +732,7 @@ export function toModelMessageContent(
           } satisfies ToolCallPart;
         }
         case "tool-result": {
-          return normalizeToolResult(part, metadata);
+          return toModelToolResult(part, metadata);
         }
         case "reasoning":
           return {
@@ -706,6 +740,19 @@ export function toModelMessageContent(
             text: part.text,
             ...metadata,
           } satisfies ReasoningPart;
+        case "reasoning-file":
+          return {
+            type: part.type,
+            data: toAIReasoningFileData(part.data),
+            mediaType: part.mediaType,
+            ...metadata,
+          } satisfies ReasoningFilePart;
+        case "custom":
+          return {
+            type: part.type,
+            kind: part.kind as `${string}.${string}`,
+            ...metadata,
+          } satisfies CustomPart;
         case "redacted-reasoning":
           // TODO: should we just drop this?
           return {
@@ -768,10 +815,7 @@ export function normalizeToolOutput(
   };
 }
 
-/**
- * Project a stored tool result output into the AI SDK 7 shape. v7 renamed the
- * `media` content part to `image-data` and requires a `kind` on custom parts.
- */
+/** Project a stored tool result output into the AI SDK 7 shape. */
 function toAISDKToolResultOutput(
   output: Infer<typeof vToolResultOutput>,
 ): ToolResultOutput {
@@ -791,31 +835,146 @@ function toAISDKToolResultOutput(
       if (part.type === "custom") {
         return { ...part, kind: "agent.legacy" as const };
       }
+      if (part.type === "file") {
+        return { ...part, data: toAIFileData(part.data) };
+      }
       return part;
     }),
   };
 }
 
-function normalizeToolResult(
+function serializeToolResultOutput(
+  output: unknown,
+): Infer<typeof vToolResultOutput> {
+  if (output === undefined) {
+    return { type: "json", value: null };
+  }
+  if (typeof output === "string") {
+    return { type: "text", value: output };
+  }
+  if (
+    output &&
+    typeof output === "object" &&
+    "type" in output &&
+    output.type === "content" &&
+    "value" in output &&
+    Array.isArray(output.value)
+  ) {
+    const candidate = {
+      ...output,
+      value: output.value.map((part: unknown) => {
+        if (
+          part &&
+          typeof part === "object" &&
+          "type" in part &&
+          part.type === "file" &&
+          "data" in part
+        ) {
+          return { ...part, data: serializeFileData(part.data as FileData) };
+        }
+        if (
+          part &&
+          typeof part === "object" &&
+          "type" in part &&
+          (part.type === "file-url" || part.type === "image-url") &&
+          "url" in part
+        ) {
+          return { ...part, url: String(part.url) };
+        }
+        return part;
+      }),
+    };
+    if (validate(vToolResultOutput, candidate)) return candidate;
+  }
+  if (validate(vToolResultOutput, output)) return output;
+  return normalizeToolOutput(
+    JSON.stringify(output ?? null),
+  ) as Infer<typeof vToolResultOutput>;
+}
+
+async function serializeToolResult(
+  ctx: ActionCtx | MutationCtx,
+  component: AgentComponent,
   part: ToolResultPart | Infer<typeof vToolResultPart>,
   metadata: {
     providerOptions?: ProviderOptions;
     providerMetadata?: ProviderMetadata;
   },
-): ToolResultPart & Infer<typeof vToolResultPart> {
+  fileIds: string[],
+): Promise<Infer<typeof vToolResultPart>> {
+  const stored = storedToolResultOutput(part);
+  if (stored.type === "content") {
+    stored.value = await Promise.all(
+      stored.value.map(async (value) =>
+        value.type === "file"
+          ? {
+              ...value,
+              data: await storeSerializedFileData(
+                ctx,
+                component,
+                value.data,
+                value.mediaType,
+                fileIds,
+              ),
+            }
+          : value,
+      ),
+    );
+  }
   return {
     type: part.type,
-    output: part.output
-      ? validate(vToolResultOutput, part.output)
-        ? (part.output as any)
-        : normalizeToolOutput(JSON.stringify(part.output))
-      : normalizeToolOutput("result" in part ? part.result : undefined),
+    output: stored,
     toolCallId: part.toolCallId,
     toolName: part.toolName,
-    // Preserve isError flag for error reporting
     ...("isError" in part && part.isError ? { isError: true } : {}),
     ...metadata,
-  } satisfies ToolResultPart;
+  };
+}
+
+function serializeToolResultWithoutStorage(
+  part: ToolResultPart | Infer<typeof vToolResultPart>,
+  metadata: {
+    providerOptions?: ProviderOptions;
+    providerMetadata?: ProviderMetadata;
+  },
+): Infer<typeof vToolResultPart> {
+  return {
+    type: part.type,
+    output: storedToolResultOutput(part),
+    toolCallId: part.toolCallId,
+    toolName: part.toolName,
+    ...("isError" in part && part.isError ? { isError: true } : {}),
+    ...metadata,
+  };
+}
+
+function toModelToolResult(
+  part: ToolResultPart | Infer<typeof vToolResultPart>,
+  metadata: {
+    providerOptions?: ProviderOptions;
+    providerMetadata?: ProviderMetadata;
+  },
+): ToolResultPart {
+  const stored = storedToolResultOutput(part);
+  return {
+    type: part.type,
+    output: toAISDKToolResultOutput(stored),
+    toolCallId: part.toolCallId,
+    toolName: part.toolName,
+    ...("isError" in part && part.isError ? { isError: true } : {}),
+    ...metadata,
+  } as ToolResultPart;
+}
+
+function storedToolResultOutput(
+  part: ToolResultPart | Infer<typeof vToolResultPart>,
+): Infer<typeof vToolResultOutput> {
+  if (part.output !== undefined) {
+    return serializeToolResultOutput(part.output);
+  }
+  return normalizeToolOutput(
+    "result" in part ? part.result : undefined,
+  ) as Infer<typeof vToolResultOutput>;
 }
 
 /**
@@ -935,6 +1094,106 @@ export function serializeDataOrUrl(
     dataOrUrl.byteOffset,
     dataOrUrl.byteOffset + dataOrUrl.byteLength,
   ) as ArrayBuffer;
+}
+
+function serializeFileData(
+  data: FileData | ReasoningFilePart["data"] | StoredFileData,
+): StoredFileData {
+  if (typeof data === "object" && data !== null && "type" in data) {
+    switch (data.type) {
+      case "data":
+        return { type: "data", data: serializeDataOrUrl(data.data) };
+      case "url":
+        return { type: "url", url: data.url.toString() };
+      case "reference":
+        return { type: "reference", reference: data.reference };
+      case "text":
+        return { type: "text", text: data.text };
+    }
+  }
+  if (data instanceof URL) {
+    return { type: "url", url: data.toString() };
+  }
+  return { type: "data", data: serializeDataOrUrl(data) };
+}
+
+function toAIFileData(data: StoredFileData): FileData {
+  switch (data.type) {
+    case "data":
+      return { type: "data", data: data.data };
+    case "url":
+      return { type: "url", url: new URL(data.url) };
+    case "reference":
+      return data;
+    case "text":
+      return data;
+  }
+}
+
+function toAIReasoningFileData(
+  data: ReasoningFilePart["data"] | StoredFileData,
+): ReasoningFilePart["data"] {
+  if (
+    data instanceof URL ||
+    data instanceof ArrayBuffer ||
+    data instanceof Uint8Array ||
+    typeof data === "string"
+  ) {
+    return data;
+  }
+  switch (data.type) {
+    case "data":
+      return { type: "data", data: data.data };
+    case "url":
+      return {
+        type: "url",
+        url: data.url instanceof URL ? data.url : new URL(data.url),
+      };
+    case "reference":
+    case "text":
+      throw unsupportedV1ContentPart(
+        `reasoning file ${data.type} data`,
+      );
+  }
+}
+
+async function storeSerializedFileData(
+  ctx: ActionCtx | MutationCtx,
+  component: AgentComponent,
+  data: StoredFileData,
+  mediaType: string,
+  fileIds: string[],
+): Promise<StoredFileData> {
+  if (
+    data.type !== "data" ||
+    !(data.data instanceof ArrayBuffer) ||
+    data.data.byteLength <= MAX_FILE_SIZE
+  ) {
+    return data;
+  }
+  const { file } = await storeFile(
+    ctx,
+    component,
+    new Blob([data.data], { type: mediaType }),
+  );
+  fileIds.push(file.fileId);
+  return { type: "url", url: file.url };
+}
+
+async function serializeAndStoreFileData(
+  ctx: ActionCtx | MutationCtx,
+  component: AgentComponent,
+  data: FileData | ReasoningFilePart["data"] | StoredFileData,
+  mediaType: string,
+  fileIds: string[],
+): Promise<StoredFileData> {
+  return storeSerializedFileData(
+    ctx,
+    component,
+    serializeFileData(data),
+    mediaType,
+    fileIds,
+  );
 }
 
 export function toModelMessageDataOrUrl(

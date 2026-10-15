@@ -103,6 +103,15 @@ npm install @ai-sdk/openai@^4.0.0  # or whichever provider
 
 The remaining sections describe the older v5 to v6 upgrade. Apply them first when a project is still on v0.3.x, then continue with `MIGRATION.md`.
 
+#### Step 1: Update Dependencies
+
+Update all AI SDK packages together to avoid peer dependency conflicts:
+
+```bash
+npm install @convex-dev/agent@^0.6.0 ai@^6.0.35 @ai-sdk/provider-utils@^4.0.6
+npm install @ai-sdk/openai@^3.0.10  # or whichever provider
+```
+
 #### Step 2: Detect v5 Patterns
 
 Search for these patterns indicating v5 usage:
